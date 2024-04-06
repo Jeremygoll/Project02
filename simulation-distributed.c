@@ -39,6 +39,32 @@
    #error "MPI_SIZE_T indeterminate"
 #endif
 
+void idk_what_this_function_is_yet(environment* env) {
+    // TODO: every process has its own list of spawned organisms, they need to be merged into a
+    // single list in one process before environment_process_spawned_organisms() is called from
+    // that process. Then, the list of spawned organisms should be sent back to the other
+    // processes so organisms can be spawned in the correct locations. At the end, each process
+    // should clear its own list of spawned organisms after the merge by doing
+    // env.spawned[i].size = 0; This code should probably be placed in a function.
+
+    // spawn new organisms
+    // TODO: need to move all spawned organisms to the primary process before calling environment_process_spawned_organisms()
+    // Ask Jeff: how can we tell what size the spawned organisms array will be?
+    if (rank == 0) {
+        spawned_org_array* all_spawned = malloc(size * sizeof(spawned_org_array));
+        MPI_Recv(...)
+    } else {
+        MPI_Send(...)
+    }
+    environment_process_spawned_organisms(&env);
+    for (size_t i = 0; i < env.spawned[0].size; i++) {
+        // TODO: need to spawn the organisms in the correct processes
+        organism_spawn(&env, &env.spawned[0].data[i]);
+    }
+    // TODO: clear the spawned organisms in all non-primary processes this needs to set the size to 0 for all spawned arrays
+    env.spawned[0].size = 0;
+}
+
 
 int main(int argc, char* argv[]) {
     // TODO: initialize MPI, get rank & size
@@ -95,8 +121,15 @@ int main(int argc, char* argv[]) {
     }
 
     // TODO: initialize the spawned organism MPI datatype
+    MPI_Datatype organism_type;
+    MPI_Type_create_struct(3, organism_field_counts, organism_field_offsets, organism_field_types, &organism_type);
+    MPI_Type_commit(&organism_type);
 
     // TODO: have every process figure out which rows/cells it is responsible for
+    // copilot suggest, I think this makes sense
+    size_t start_row = rank * world_size / size;
+    size_t end_row = (rank + 1) * world_size / size;
+    size_t rows = end_row - start_row;
     
     // start the timer
     struct timespec start, end;
@@ -106,7 +139,7 @@ int main(int argc, char* argv[]) {
     for (size_t t = 0; t < iterations; t++) {
         // TODO: run the inner loop in parallel, but only over ones for this MPI process
         #pragma omp parallel for default(none) num_threads(num_threads) firstprivate(world_size) shared(env) schedule(dynamic, 16)
-        for (size_t i = 0; i < world_size*world_size; i++) {
+        for (size_t i = start_row * world_size; i < end_row * world_size; i++) {
             organism_update(&env.grid[i]);
         }
 
@@ -116,6 +149,7 @@ int main(int argc, char* argv[]) {
         // processes so organisms can be spawned in the correct locations. At the end, each process
         // should clear its own list of spawned organisms after the merge by doing
         // env.spawned[i].size = 0; This code should probably be placed in a function.
+        idk_what_this_function_is_yet(&env);
 
         // spawn new organisms
         // TODO: need to move all spawned organisms to the primary process before calling environment_process_spawned_organisms()
@@ -166,6 +200,7 @@ int main(int argc, char* argv[]) {
 
     // TODO: cleanup/finalize anything added for MPI
     //todo: shutdown here maybe?
+    MPI_Type_free(&organism_type);
     MPI_Finalize();
     return 0;
 }
