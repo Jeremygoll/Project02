@@ -261,6 +261,15 @@ spawned_org_array* spawned_org_array_init(spawned_org_array* arr);
 bool spawned_org_array_ensure_capacity(spawned_org_array* arr, size_t capacity);
 
 /**
+ * Combine the list of spawned organisms. This merges the list of spawned
+ * organisms from all threads into a single list. They will end up in the thread 
+ * 0's spawned list but no further processing.
+ * 
+ * This must be called from thread 0.
+ */
+void environment_combine_spawned_organisms(environment* env);
+
+/**
  * Process the list of spawned organisms. This merges the list of spawned
  * organisms from all threads into a single list and then has them determine
  * the new locations for the organisms. They will end up in the thread 0's

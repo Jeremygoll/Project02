@@ -94,7 +94,7 @@ spawned_organism* spawned_org_array_get_next(spawned_org_array* arr) {
     if (arr->size == arr->capacity) {
         size_t capacity = arr->capacity + MIN(arr->capacity, 256);
         spawned_organism* data = (spawned_organism*)realloc(
-            arr->data, arr->capacity*sizeof(spawned_organism));
+            arr->data, capacity*sizeof(spawned_organism));
         if (!data) { perror("error reallocating spawned array"); return NULL; }
         arr->data = data;
         arr->capacity = capacity;
@@ -109,10 +109,10 @@ bool spawned_org_array_ensure_capacity(spawned_org_array* arr, size_t capacity) 
     size_t new_capacity = arr->capacity + MIN(arr->capacity, 256);
     while (new_capacity <= capacity) { new_capacity += MIN(new_capacity, 256); }
     spawned_organism* data = (spawned_organism*)realloc(
-        arr->data, capacity*sizeof(spawned_organism));
+        arr->data, new_capacity*sizeof(spawned_organism));
     if (!data) { perror("error reallocating spawned array"); return false; }
     arr->data = data;
-    arr->capacity = capacity;
+    arr->capacity = new_capacity;
     return true;
 }
 
@@ -683,20 +683,16 @@ void organism_spawn(environment* env, spawned_organism* org) {
     organism_set(&env->grid[org->loc], org->genome, org->size);
 }
 
-static int spawned_organism_compare(const spawned_organism* a, const spawned_organism* b) {
-    return a->loc - b->loc;
-}
-
-void environment_process_spawned_organisms(environment* env) {
-    const size_t world_size = env->world_size;
-    organism* grid = env->grid;
+void environment_combine_spawned_organisms(environment* env) {
     spawned_org_array* spawned_arrs = env->spawned;
     const int num_threads = env->num_threads;
-    spawned_org_array* array = &spawned_arrs[0];
 
     // combine the spawned organisms from all threads into a single array
     size_t total = spawned_arrs[0].size;
-    for (int i = 1; i < num_threads; i++) { total += spawned_arrs[i].size; }
+    for (int i = 1; i < num_threads; i++) {
+        total += spawned_arrs[i].size;
+        spawned_arrs[i].size = 0;
+    }
     if (total > 0) {
         spawned_org_array_ensure_capacity(&spawned_arrs[0], total);
 
@@ -709,7 +705,23 @@ void environment_process_spawned_organisms(environment* env) {
         }
         
         spawned_arrs[0].size = total;
+    }
+}
 
+static int spawned_organism_compare(const spawned_organism* a, const spawned_organism* b) {
+    return a->loc - b->loc;
+}
+
+void environment_process_spawned_organisms(environment* env) {
+    // combine the spawned organisms from all threads into a single array
+    environment_combine_spawned_organisms(env);
+
+    const size_t world_size = env->world_size;
+    organism* grid = env->grid;
+    spawned_org_array* array = &env->spawned[0];
+    size_t total = array->size;
+
+    if (total > 0) {
         // sort the spawned organisms by location to create a consistent ordering
         // TODO: this could be done in parallel (but the overhead may not be worth it)
         qsort(array->data, total, sizeof(spawned_organism), (int (*)(const void*, const void*))spawned_organism_compare);
