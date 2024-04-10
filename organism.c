@@ -688,14 +688,13 @@ void environment_combine_spawned_organisms(environment* env) {
     const int num_threads = env->num_threads;
 
     // combine the spawned organisms from all threads into a single array
-    size_t total = spawned_arrs[0].size;
-    for (int i = 1; i < num_threads; i++) {
-        total += spawned_arrs[i].size;
-        spawned_arrs[i].size = 0;
-    }
+    size_t total = spawned_arrs[0].size; // total in all threads
+    for (int i = 1; i < num_threads; i++) { total += spawned_arrs[i].size; }
     if (total > 0) {
+        // make sure the combined array has enough capacity
         spawned_org_array_ensure_capacity(&spawned_arrs[0], total);
 
+        // copy the spawned organisms from all threads into the combined array
         size_t offset = spawned_arrs[0].size;
         for (int i = 1; i < num_threads; i++) {
             spawned_org_array* arr = &spawned_arrs[i];
@@ -703,7 +702,6 @@ void environment_combine_spawned_organisms(environment* env) {
             offset += arr->size;
             arr->size = 0;
         }
-        
         spawned_arrs[0].size = total;
     }
 }
