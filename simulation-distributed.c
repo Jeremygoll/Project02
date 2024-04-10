@@ -39,7 +39,7 @@
    #error "MPI_SIZE_T indeterminate"
 #endif
 
-void idk_what_to_call_this_function(environment* env, int start_row, int end_row, int rank, int size) {
+void gather_spawned_organisms_rank_zero(environment* env, int size, MPI_Datatype organism_type) {
     // TODO: every process has its own list of spawned organisms, they need to be merged into a
     // single list in one process before environment_process_spawned_organisms() is called from
     // that process. Then, the list of spawned organisms should be sent back to the other
@@ -51,18 +51,50 @@ void idk_what_to_call_this_function(environment* env, int start_row, int end_row
     // TODO: need to move all spawned organisms to the primary process before calling environment_process_spawned_organisms()
     environment_combine_spawned_organisms(env); // this sums over all threads in the current process, not across processes
     int num_spawned = env->spawned[0].size;
-    int* all_num_spawned = malloc(sizeof(int) * size);
+    int* counts = malloc(sizeof(int) * size); // this is rank 0 only
+    MPI_Gather(&num_spawned, 1, MPI_INT, counts, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-    MPI_Gather(&num_spawned, 1, MPI_INT, all_num_spawned, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    
-    environment_process_spawned_organisms(env);
-    for (size_t i = 0; i < env->spawned[0].size; i++) {
-        // TODO: need to spawn the organisms in the correct processes
-        organism_spawn(env, &env->spawned[0].data[i]);
+    // these are rank 0 only
+    int* displacements = (int*)malloc(size * sizeof(int));
+    for (int i = 0; i < size; i++) {
+        displacements[i] = i == 0 ? 0 : displacements[i - 1] + counts[i - 1];
     }
-    // TODO: clear the spawned organisms in all non-primary processes this needs to set the size to 0 for all spawned arrays
-    env->spawned[0].size = 0;
+    int total = displacements[size - 1] + counts[size - 1];
 
+    spawned_org_array* spawned = &env->spawned[0];
+
+    // this is rank 0 only
+    spawned_org_array_ensure_capacity(spawned, total);
+
+    MPI_Gatherv(MPI_IN_PLACE, spawned->size, organism_type,
+        spawned->data, counts, displacements, organism_type,
+        0, MPI_COMM_WORLD);
+
+    environment_process_spawned_organisms(&env);
+    // TODO: Scatter sizes and spawned organisms to all processes
+
+}
+
+void gather_spawned_organisms_other_ranks(environment* env, int rank, int size, MPI_Datatype organism_type) {
+    // TODO: every process has its own list of spawned organisms, they need to be merged into a
+    // single list in one process before environment_process_spawned_organisms() is called from
+    // that process. Then, the list of spawned organisms should be sent back to the other
+    // processes so organisms can be spawned in the correct locations. At the end, each process
+    // should clear its own list of spawned organisms after the merge by doing
+    // env.spawned[i].size = 0; This code should probably be placed in a function.
+
+    // spawn new organisms
+    // TODO: need to move all spawned organisms to the primary process before calling environment_process_spawned_organisms()
+    environment_combine_spawned_organisms(env); // this sums over all threads in the current process, not across processes
+    MPI_Gather(&env->spawned[0].size, 1, MPI_INT, NULL, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+    spawned_org_array* spawned = &env->spawned[0];
+
+    MPI_Gatherv(spawned->data, spawned->size, organism_type,
+        spawned->data, counts, NULL, organism_type,
+        0, MPI_COMM_WORLD);
+    
+    // TODO: Scatter sizes and spawned organisms to all processes
 }
 
 
@@ -142,8 +174,22 @@ int main(int argc, char* argv[]) {
         for (size_t i = start_row * world_size; i < end_row * world_size; i++) {
             organism_update(&env.grid[i]);
         }
-        idk_what_to_call_this_function(&env, start_row, end_row, rank, size);
         
+        // TODO: need to move all spawned organisms to the primary process before calling environment_process_spawned_organisms()
+        if (rank == 0) {
+            gather_spawned_organisms_rank_zero(&env, size, organism_type);
+        } else {
+            gather_spawned_organisms_other_ranks(&env, rank, size, organism_type);
+        }
+
+        // spawn new organisms
+        for (size_t i = 0; i < env.spawned[0].size; i++) {
+            // TODO: need to spawn the organisms in the correct processes
+            organism_spawn(&env, &env.spawned[0].data[i]);
+        }
+        // TODO: clear the spawned organisms in all non-primary processes this needs to set the size to 0 for all spawned arrays
+        env.spawned[0].size = 0;
+
         if (organism_debug && t % (1024*1024) == 0) { environment_print(&env); }
     }
 
@@ -156,7 +202,7 @@ int main(int argc, char* argv[]) {
         // TODO: receive all of the organisms from other processes and place in our grid
 
         if (organism_debug && iterations % (1024*1024) != 0) { environment_print(&env); }
-
+    
         // get the elapsed time
         clock_gettime(CLOCK_MONOTONIC, &end);
         double time = end.tv_sec-start.tv_sec+(end.tv_nsec-start.tv_nsec)/1000000000.0;
@@ -182,4 +228,7 @@ int main(int argc, char* argv[]) {
     environment_free(&env);
 
     // TODO: cleanup/finalize anything added for MPI
+    MPI_Type_free(&organism_type);
+    MPI_Finalize();
+    return 0;
 }
