@@ -70,9 +70,20 @@ void gather_spawned_organisms_rank_zero(environment* env, int size, MPI_Datatype
         spawned->data, counts, displacements, organism_type,
         0, MPI_COMM_WORLD);
 
-    environment_process_spawned_organisms(&env);
+    environment_process_spawned_organisms(env);
+    
     // TODO: Scatter sizes and spawned organisms to all processes
+    size_t rows = env->world_size;
+    size_t per_process = rows / size;
+    size_t remainder = rows % size;
+    // count and displacements are being reused from earlier
+    for (int i = 0; i < size; i++) {
+        counts[i] = per_process + (i < remainder);
+        displacements[i] = i * per_process + (i < remainder ? i : remainder);
+    }
 
+    MPI_Scatter(counts, 1, MPI_INT, &env->spawned[0].size, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Scatterv(env->spawned[0].data, counts, displacements, organism_type, env->spawned[0].data, env->spawned[0].size, organism_type, 0, MPI_COMM_WORLD);
 }
 
 void gather_spawned_organisms_other_ranks(environment* env, int rank, int size, MPI_Datatype organism_type) {
@@ -91,10 +102,14 @@ void gather_spawned_organisms_other_ranks(environment* env, int rank, int size, 
     spawned_org_array* spawned = &env->spawned[0];
 
     MPI_Gatherv(spawned->data, spawned->size, organism_type,
-        spawned->data, counts, NULL, organism_type,
+        spawned->data, NULL, NULL, organism_type,
         0, MPI_COMM_WORLD);
     
     // TODO: Scatter sizes and spawned organisms to all processes
+    MPI_Scatter(NULL, 1, MPI_INT, &env->spawned[0].size, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    spawned_org_array_ensure_capacity(spawned, env->spawned[0].size);
+
+    MPI_Scatterv(env->spawned[0].data, NULL, NULL, organism_type, env->spawned[0].data, env->spawned[0].size, organism_type, 0, MPI_COMM_WORLD);
 }
 
 
