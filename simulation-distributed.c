@@ -84,6 +84,9 @@ void gather_spawned_organisms_rank_zero(environment* env, int size, MPI_Datatype
 
     MPI_Scatter(counts, 1, MPI_INT, &env->spawned[0].size, 1, MPI_INT, 0, MPI_COMM_WORLD);
     MPI_Scatterv(env->spawned[0].data, counts, displacements, organism_type, env->spawned[0].data, env->spawned[0].size, organism_type, 0, MPI_COMM_WORLD);
+
+    free(counts);
+    free(displacements);
 }
 
 void gather_spawned_organisms_other_ranks(environment* env, int rank, int size, MPI_Datatype organism_type) {
@@ -175,9 +178,9 @@ int main(int argc, char* argv[]) {
     // TODO: have every process figure out which rows/cells it is responsible for
     int start_row = rank * world_size / size;
     int end_row = (rank + 1) * world_size / size;
+    int num_rows = end_row - start_row;
+    int remainder = world_size % size;
 
-    
-    
     // start the timer
     struct timespec start, end;
     clock_gettime(CLOCK_MONOTONIC, &start);
@@ -210,12 +213,26 @@ int main(int argc, char* argv[]) {
 
     // TODO: sum number of tasks from all processes for distributed version
     environment_combine_tasks(&env); // this sums over all threads in the current process, not across processes
+    MPI_Reduce(rank == 0 ? MPI_IN_PLACE : env.tasks_completed[0].counts,
+               env.tasks_completed[0].counts, NUM_TASKS, MPI_SIZE_T, MPI_SUM, 0, MPI_COMM_WORLD);
 
+    int start_index = start_row * world_size;
+    int end_index = end_row * world_size;
+    int num_cells = end_index - start_index;
     if (rank != 0) {
         // TODO: move organisms to the primary process
+        MPI_Send(&env.grid[start_index], num_cells, organism_type,
+                 0, 0, MPI_COMM_WORLD);
     } else {
         // TODO: receive all of the organisms from other processes and place in our grid
-
+        for (int i = 1; i < size; i++) {
+            if (i == size - 1) {
+                num_rows = remainder;
+            }
+            MPI_Recv(&env.grid[i * num_rows * world_size], num_rows * world_size, organism_type,
+                     i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        }
+    
         if (organism_debug && iterations % (1024*1024) != 0) { environment_print(&env); }
     
         // get the elapsed time
